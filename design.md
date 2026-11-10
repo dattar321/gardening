@@ -1,80 +1,60 @@
-# Gardening Website — System Design & Development Plan
+# Gardening Website --- System Design & Development Plan
 
+**Version:** 1.0\
+**Status:** Draft\
+**Product:** On-demand gardening and lawn-care services\
+**Deployment target:** Hostinger VPS with Docker Compose
 
+## 1. Confirmed technology stack
 
-Architecture confirmed
+  Area                    Technology
+  ----------------------- --------------------------------------------------
+  Frontend                Next.js + JavaScript
+  Styling                 Tailwind CSS
+  Backend                 FastAPI + Python
+  Database                PostgreSQL
+  ORM                     SQLAlchemy
+  Migrations              Alembic
+  Image storage           External object storage (Cloudflare R2 proposed)
+  Calendar                Google Calendar API
+  Payments                Stripe
+  Deployment              Hostinger VPS
+  Containers              Docker Compose
+  Reverse proxy / HTTPS   Caddy
+  Email                   SMTP provider
 
-&#x20;Version 1.0 · Technical design
+## 2. Architecture approach
 
+Use a **modular monolith**: one backend application divided into clear
+business modules. This is simpler and cheaper to deploy than
+microservices and is sufficient for the first version.
 
+PostgreSQL is the primary source of truth. Google Calendar is an
+integration for availability and event synchronization; it does not
+replace the booking database.
 
-Your confirmed architecture:
-
-| Component     | Technology              |
-| ------------- | ----------------------- |
-| Frontend      | Next.js + JavaScript    |
-| Styling       | Tailwind CSS            |
-| Backend       | FastAPI + Python        |
-| Database      | PostgreSQL              |
-| ORM           | SQLAlchemy              |
-| Migrations    | Alembic                 |
-| Image storage | External object storage |
-| Calendar      | Google Calendar API     |
-| Payment       | Stripe                  |
-| Deployment    | Hostinger VPS           |
-| Containers    | Docker Compose          |
-| Reverse proxy | Caddy                   |
-| Email         | SMTP provider           |
-
-I recommend a modular monolithic architecture.
-
-This means one application with clearly separated modules rather than multiple independent backend services. It is easier to develop, deploy, debug and maintain, and is sufficient for this business.
-
-# 1. Overall system architecture
-
-Users
-
-Customers · Administrator
-
-Next.js
-
-Public website · Quote interface · Booking · Admin dashboard
-
-FastAPI
-
-REST API · Authentication · Business logic · Integrations
-
-PostgreSQL
-
-Application data
-
-Object Storage
-
-Customer images
-
-External integrations
-
-Stripe
-
-Google Calendar
-
-Email provider
-
-Google Reviews
-
-One additional component: a lightweight background worker.
-
-It handles tasks such as sending emails, processing booking notifications and retrying failed integrations. It can share the same FastAPI codebase and database.
-
-Important architecture decision: PostgreSQL will be the primary source of truth. Google Calendar will synchronize bookings and availability, not replace the database.
-
-# 2. Frontend design
-
-Use Next.js with JavaScript, not TypeScript initially if you prefer to keep the codebase entirely JavaScript.
-
-Recommended frontend structure:
-
+``` mermaid
+flowchart TD
+    U[Customers and Admin] --> FE[Next.js frontend]
+    FE --> API[FastAPI REST API]
+    API --> DB[(PostgreSQL)]
+    API --> OBJ[Object storage]
+    API --> STRIPE[Stripe]
+    API --> GC[Google Calendar API]
+    API --> EMAIL[Email provider]
+    API --> WORKER[Background worker]
+    WORKER --> DB
+    WORKER --> GC
+    WORKER --> EMAIL
 ```
+
+The background worker handles email delivery, calendar synchronization
+retries and other tasks that should not delay an HTTP request. It can
+share the FastAPI codebase and database.
+
+## 3. Frontend structure
+
+``` text
 frontend/
 ├── app/
 │   ├── (public)/
@@ -83,16 +63,11 @@ frontend/
 │   │   ├── about/
 │   │   ├── contact/
 │   │   └── legal/
-│   │
 │   ├── quote/
-│   │   ├── page.js
 │   │   └── manual/
-│   │
 │   ├── booking/
-│   │   ├── page.js
 │   │   ├── checkout/
 │   │   └── confirmation/
-│   │
 │   └── admin/
 │       ├── login/
 │       ├── dashboard/
@@ -101,45 +76,37 @@ frontend/
 │       ├── services/
 │       ├── pricing/
 │       └── settings/
-│
 ├── components/
 │   ├── layout/
 │   ├── services/
 │   ├── quote/
 │   ├── booking/
 │   └── admin/
-│
 ├── lib/
 │   ├── api.js
 │   └── utils.js
-│
 └── public/
 ```
 
-### Frontend performance strategy
+### Frontend performance
 
-- Server-render public pages where appropriate.
-- Static generation for service pages.
-- Client-side JavaScript only where interaction is needed.
-- Lazy-load images.
-- Use optimized WebP/AVIF images.
-- Avoid heavy UI libraries.
-- Keep the admin dashboard separate from public page bundles.
+-   Generate public service pages statically where possible.
+-   Use server rendering where content is dynamic.
+-   Load client-side JavaScript only for interactive features.
+-   Optimize and lazy-load images.
+-   Avoid large UI libraries unless needed.
+-   Keep admin code out of public page bundles.
 
-# 3. Backend design
+## 4. Backend structure
 
-Divide FastAPI into independent business modules.
-
-```
+``` text
 backend/
 ├── app/
 │   ├── main.py
-│   │
 │   ├── core/
 │   │   ├── config.py
 │   │   ├── security.py
 │   │   └── database.py
-│   │
 │   ├── modules/
 │   │   ├── auth/
 │   │   ├── customers/
@@ -152,479 +119,392 @@ backend/
 │   │   ├── reviews/
 │   │   ├── notifications/
 │   │   └── settings/
-│   │
 │   ├── integrations/
 │   │   ├── google_calendar.py
 │   │   ├── stripe.py
 │   │   ├── storage.py
 │   │   └── email.py
-│   │
 │   └── worker/
 │       └── tasks.py
-│
 ├── migrations/
 ├── tests/
 ├── requirements.txt
 └── Dockerfile
 ```
 
-Each module should contain its own:
-
-- Models
-- Schemas
-- Routes
-- Services
-- Business logic
-
-For example, the pricing module calculates quotes. The booking module handles appointments. The payment module handles Stripe.
-
-This separation makes future modifications easier.
-
-# 4. Database design
-
-Use PostgreSQL with relational tables.
-
-I recommend the following structure.
-
-## 4.1 Main tables
-
-| Table               | Purpose                           |
-| ------------------- | --------------------------------- |
-| users               | Admin accounts                    |
-| customers           | Customer details                  |
-| services            | Gardening services                |
-| service_pricing     | Pricing configuration             |
-| size_tiers          | Small, medium, large, acreage     |
-| pricing_modifiers   | Condition and access adjustments  |
-| addons              | Additional service prices         |
-| postcodes           | Accepted service areas            |
-| quotes              | Instant quote records             |
-| quote_requests      | Manual image-quote requests       |
-| quote_images        | Uploaded image metadata           |
-| bookings            | Booking information               |
-| booking_items       | Services included in booking      |
-| booking_occurrences | Individual recurring appointments |
-| payments            | Payment records                   |
-| calendar_events     | Google Calendar event references  |
-| notifications       | Admin/customer notifications      |
-| reviews             | Review request records            |
-| settings            | Business configuration            |
-| background_jobs     | Pending integration tasks         |
-
-## 4.2 Important relationships
-
-\#chatgpt-mermaid-\_r_l7\_{font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,"Segoe UI",Helvetica,"Apple Color Emoji",Arial,sans-serif,"Segoe UI Emoji","Segoe UI Symbol";font-size:16px;fill:rgb(237, 237, 237);}@keyframes edge-animation-frame{from{stroke-dashoffset:0;}}@keyframes dash{to{stroke-dashoffset:0;}}#chatgpt-mermaid-\_r_l7\_ .edge-animation-slow{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 50s linear infinite;stroke-linecap:round;}#chatgpt-mermaid-\_r_l7\_ .edge-animation-fast{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 20s linear infinite;stroke-linecap:round;}#chatgpt-mermaid-\_r_l7\_ .error-icon{fill:rgb(48, 48, 48);}#chatgpt-mermaid-\_r_l7\_ .error-text{fill:rgb(237, 237, 237);stroke:rgb(237, 237, 237);}#chatgpt-mermaid-\_r_l7\_ .edge-thickness-normal{stroke-width:1px;}#chatgpt-mermaid-\_r_l7\_ .edge-thickness-thick{stroke-width:3.5px;}#chatgpt-mermaid-\_r_l7\_ .edge-pattern-solid{stroke-dasharray:0;}#chatgpt-mermaid-\_r_l7\_ .edge-thickness-invisible{stroke-width:0;fill:none;}#chatgpt-mermaid-\_r_l7\_ .edge-pattern-dashed{stroke-dasharray:3;}#chatgpt-mermaid-\_r_l7\_ .edge-pattern-dotted{stroke-dasharray:2;}#chatgpt-mermaid-\_r_l7\_ .marker{fill:rgb(175, 175, 175);stroke:rgb(175, 175, 175);}#chatgpt-mermaid-\_r_l7\_ .marker.cross{stroke:rgb(175, 175, 175);}#chatgpt-mermaid-\_r_l7\_ svg{font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,"Segoe UI",Helvetica,"Apple Color Emoji",Arial,sans-serif,"Segoe UI Emoji","Segoe UI Symbol";font-size:16px;}#chatgpt-mermaid-\_r_l7\_ p{margin:0;}#chatgpt-mermaid-\_r_l7\_ .entityBox{fill:rgb(9, 23, 44);stroke:rgb(31, 78, 148);}#chatgpt-mermaid-\_r_l7\_ .relationshipLabelBox{fill:rgb(48, 48, 48);opacity:0.7;background-color:rgb(48, 48, 48);}#chatgpt-mermaid-\_r_l7\_ .relationshipLabelBox rect{opacity:0.5;}#chatgpt-mermaid-\_r_l7\_ .labelBkg{background-color:rgba(48, 48, 48, 0.5);}#chatgpt-mermaid-\_r_l7\_ .edgeLabel{background-color:rgb(0, 0, 0);}#chatgpt-mermaid-\_r_l7\_ .edgeLabel .label rect{fill:rgb(0, 0, 0);}#chatgpt-mermaid-\_r_l7\_ .edgeLabel .label text{fill:rgb(237, 237, 237);}#chatgpt-mermaid-\_r_l7\_ .edgeLabel .label{fill:rgb(31, 78, 148);font-size:14px;}#chatgpt-mermaid-\_r_l7\_ .label{font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,"Segoe UI",Helvetica,"Apple Color Emoji",Arial,sans-serif,"Segoe UI Emoji","Segoe UI Symbol";color:rgb(237, 237, 237);}#chatgpt-mermaid-\_r_l7\_ .edge-pattern-dashed{stroke-dasharray:8,8;}#chatgpt-mermaid-\_r_l7\_ .node rect,#chatgpt-mermaid-\_r_l7\_ .node circle,#chatgpt-mermaid-\_r_l7\_ .node ellipse,#chatgpt-mermaid-\_r_l7\_ .node polygon{fill:rgb(9, 23, 44);stroke:rgb(31, 78, 148);stroke-width:1px;}#chatgpt-mermaid-\_r_l7\_ .relationshipLine{stroke:rgb(175, 175, 175);stroke-width:1px;fill:none;}#chatgpt-mermaid-\_r_l7\_ .marker{fill:none!important;stroke:rgb(175, 175, 175)!important;stroke-width:1;}#chatgpt-mermaid-\_r_l7\_ [data-look=neo].labelBkg{background-color:rgba(48, 48, 48, 0.5);}#chatgpt-mermaid-\_r_l7\_ .node .neo-node{stroke:rgb(31, 78, 148);}#chatgpt-mermaid-\_r_l7\_ [data-look="neo"].node rect,#chatgpt-mermaid-\_r_l7\_ [data-look="neo"].cluster rect,#chatgpt-mermaid-\_r_l7\_ [data-look="neo"].node polygon{stroke:url(#chatgpt-mermaid-\_r_l7\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_l7\_ [data-look="neo"].swimlane.cluster rect{filter:none;}#chatgpt-mermaid-\_r_l7\_ [data-look="neo"].node path{stroke:url(#chatgpt-mermaid-\_r_l7\_-gradient);stroke-width:1px;}#chatgpt-mermaid-\_r_l7\_ [data-look="neo"].node .outer-path{filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_l7\_ [data-look="neo"].node .neo-line path{stroke:rgb(31, 78, 148);filter:none;}#chatgpt-mermaid-\_r_l7\_ [data-look="neo"].node circle{stroke:url(#chatgpt-mermaid-\_r_l7\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_l7\_ [data-look="neo"].node circle .state-start{fill:#000000;}#chatgpt-mermaid-\_r_l7\_ [data-look="neo"].icon-shape .icon{fill:url(#chatgpt-mermaid-\_r_l7\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_l7\_ [data-look="neo"].icon-shape .icon-neo path{stroke:url(#chatgpt-mermaid-\_r_l7\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_l7\_ :root{--mermaid-font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,"Segoe UI",Helvetica,"Apple Color Emoji",Arial,sans-serif,"Segoe UI Emoji","Segoe UI Symbol";}CUSTOMERSQUOTESQUOTE_REQUESTSBOOKINGSSERVICESSERVICE_PRICINGBOOKING_ITEMSQUOTE_IMAGESBOOKING_OCCURRENCESPAYMENTSCALENDAR_EVENTSrequestssubmitsmakeshasselected_forincluded_inconverts_tocontainscontainsscheduleshassynchronizes
-
-## 4.3 Important database rules
-
-1. Store money as integer cents, not floating-point numbers.
-2. Store booking dates in UTC and retain the business timezone (`Australia/Perth`).
-3. Store the quoted price snapshot when a quote is generated.
-4. Changing service prices must not change existing bookings.
-5. Use unique Stripe event IDs to prevent duplicate payment processing.
-6. Use unique calendar event IDs to prevent duplicate synchronization.
-7. Use soft deletion or disabling for services that have historical bookings.
-
-# 5. Pricing engine design
-
-This is one of the most important parts of the system.
-
-Different services must have independent pricing rules.
-
-Example seed data (illustrative only):
-
-| Service          | Base price | Size multiplier |
-| ---------------- | ---------- | --------------- |
-| Lawn mowing      | $50        | 1.0–2.5         |
-| Weeding          | $40        | 1.0–2.0         |
-| Gutter cleaning  | $90        | 1.0–2.0         |
-| Pressure washing | $60        | 1.0–2.5         |
-| Turf laying      | $100       | Area-based      |
-
-Actual rates will be entered through the admin dashboard.
-
-### Pricing calculation
-
-A simple model:
-
-\\[ P = (B \times S \times C \times A) - D + X \\]
-
-Where:
-
-- \\(B\\): Base price
-- \\(S\\): Size multiplier
-- \\(C\\): Condition multiplier
-- \\(A\\): Access multiplier
-- \\(D\\): Recurring discount
-- \\(X\\): Fixed add-ons
-
-However, the engine should also support service-specific calculation methods.
-
-For example:
-
-- Lawn mowing: property-size pricing.
-- Gutter cleaning: roof/property complexity.
-- Turf laying: square metres.
-- Pressure washing: surface area.
-- Tree planting: manual quote only.
-
-Important: Never assume all services can use the same formula. Admin should select a pricing method per service.
-
-### Quote workflow
-
-\#chatgpt-mermaid-\_r_le\_{font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,"Segoe UI",Helvetica,"Apple Color Emoji",Arial,sans-serif,"Segoe UI Emoji","Segoe UI Symbol";font-size:16px;fill:rgb(237, 237, 237);}@keyframes edge-animation-frame{from{stroke-dashoffset:0;}}@keyframes dash{to{stroke-dashoffset:0;}}#chatgpt-mermaid-\_r_le\_ .edge-animation-slow{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 50s linear infinite;stroke-linecap:round;}#chatgpt-mermaid-\_r_le\_ .edge-animation-fast{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 20s linear infinite;stroke-linecap:round;}#chatgpt-mermaid-\_r_le\_ .error-icon{fill:rgb(48, 48, 48);}#chatgpt-mermaid-\_r_le\_ .error-text{fill:rgb(237, 237, 237);stroke:rgb(237, 237, 237);}#chatgpt-mermaid-\_r_le\_ .edge-thickness-normal{stroke-width:1px;}#chatgpt-mermaid-\_r_le\_ .edge-thickness-thick{stroke-width:3.5px;}#chatgpt-mermaid-\_r_le\_ .edge-pattern-solid{stroke-dasharray:0;}#chatgpt-mermaid-\_r_le\_ .edge-thickness-invisible{stroke-width:0;fill:none;}#chatgpt-mermaid-\_r_le\_ .edge-pattern-dashed{stroke-dasharray:3;}#chatgpt-mermaid-\_r_le\_ .edge-pattern-dotted{stroke-dasharray:2;}#chatgpt-mermaid-\_r_le\_ .marker{fill:rgb(175, 175, 175);stroke:rgb(175, 175, 175);}#chatgpt-mermaid-\_r_le\_ .marker.cross{stroke:rgb(175, 175, 175);}#chatgpt-mermaid-\_r_le\_ svg{font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,"Segoe UI",Helvetica,"Apple Color Emoji",Arial,sans-serif,"Segoe UI Emoji","Segoe UI Symbol";font-size:16px;}#chatgpt-mermaid-\_r_le\_ p{margin:0;}#chatgpt-mermaid-\_r_le\_ .label{font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,"Segoe UI",Helvetica,"Apple Color Emoji",Arial,sans-serif,"Segoe UI Emoji","Segoe UI Symbol";color:rgb(237, 237, 237);}#chatgpt-mermaid-\_r_le\_ .cluster-label text{fill:rgb(237, 237, 237);}#chatgpt-mermaid-\_r_le\_ .cluster-label span{color:rgb(237, 237, 237);}#chatgpt-mermaid-\_r_le\_ .cluster-label span p{background-color:transparent;}#chatgpt-mermaid-\_r_le\_ .label text,#chatgpt-mermaid-\_r_le\_ span{fill:rgb(237, 237, 237);color:rgb(237, 237, 237);}#chatgpt-mermaid-\_r_le\_ .node rect,#chatgpt-mermaid-\_r_le\_ .node circle,#chatgpt-mermaid-\_r_le\_ .node ellipse,#chatgpt-mermaid-\_r_le\_ .node polygon,#chatgpt-mermaid-\_r_le\_ .node path{fill:rgb(9, 23, 44);stroke:rgb(31, 78, 148);stroke-width:1px;}#chatgpt-mermaid-\_r_le\_ .rough-node .label text,#chatgpt-mermaid-\_r_le\_ .node .label text,#chatgpt-mermaid-\_r_le\_ .image-shape .label,#chatgpt-mermaid-\_r_le\_ .icon-shape .label{text-anchor:middle;}#chatgpt-mermaid-\_r_le\_ .node .katex path{fill:#000;stroke:#000;stroke-width:1px;}#chatgpt-mermaid-\_r_le\_ .rough-node .label,#chatgpt-mermaid-\_r_le\_ .node .label,#chatgpt-mermaid-\_r_le\_ .image-shape .label,#chatgpt-mermaid-\_r_le\_ .icon-shape .label{text-align:center;}#chatgpt-mermaid-\_r_le\_ .node.clickable{cursor:pointer;}#chatgpt-mermaid-\_r_le\_ .root .anchor path{fill:rgb(175, 175, 175)!important;stroke-width:0;stroke:rgb(175, 175, 175);}#chatgpt-mermaid-\_r_le\_ .arrowheadPath{fill:rgb(175, 175, 175);}#chatgpt-mermaid-\_r_le\_ .edgePath .path{stroke:rgb(175, 175, 175);stroke-width:1px;}#chatgpt-mermaid-\_r_le\_ .flowchart-link{stroke:rgb(175, 175, 175);fill:none;}#chatgpt-mermaid-\_r_le\_ .edgeLabel{background-color:rgb(0, 0, 0);text-align:center;}#chatgpt-mermaid-\_r_le\_ .edgeLabel p{background-color:rgb(0, 0, 0);}#chatgpt-mermaid-\_r_le\_ .edgeLabel rect{opacity:0.5;background-color:rgb(0, 0, 0);fill:rgb(0, 0, 0);}#chatgpt-mermaid-\_r_le\_ .labelBkg{background-color:rgba(0, 0, 0, 0.5);}#chatgpt-mermaid-\_r_le\_ .cluster rect{fill:rgb(48, 48, 48);stroke:rgba(255, 255, 255, 0.15);stroke-width:1px;}#chatgpt-mermaid-\_r_le\_ .cluster text{fill:rgb(237, 237, 237);}#chatgpt-mermaid-\_r_le\_ .cluster span{color:rgb(237, 237, 237);}#chatgpt-mermaid-\_r_le\_ div.mermaidTooltip{position:absolute;text-align:center;max-width:200px;padding:2px;font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,"Segoe UI",Helvetica,"Apple Color Emoji",Arial,sans-serif,"Segoe UI Emoji","Segoe UI Symbol";font-size:12px;background:rgb(48, 48, 48);border:1px solid rgba(255, 255, 255, 0.15);border-radius:2px;pointer-events:none;z-index:100;}#chatgpt-mermaid-\_r_le\_ .flowchartTitleText{text-anchor:middle;font-size:18px;fill:rgb(237, 237, 237);}#chatgpt-mermaid-\_r_le\_ rect.text{fill:none;stroke-width:0;}#chatgpt-mermaid-\_r_le\_ .icon-shape,#chatgpt-mermaid-\_r_le\_ .image-shape{background-color:rgb(0, 0, 0);text-align:center;}#chatgpt-mermaid-\_r_le\_ .icon-shape p,#chatgpt-mermaid-\_r_le\_ .image-shape p{background-color:rgb(0, 0, 0);padding:2px;}#chatgpt-mermaid-\_r_le\_ .icon-shape .label rect,#chatgpt-mermaid-\_r_le\_ .image-shape .label rect{opacity:0.5;background-color:rgb(0, 0, 0);fill:rgb(0, 0, 0);}#chatgpt-mermaid-\_r_le\_ .label-icon{display:inline-block;height:1em;overflow:visible;vertical-align:-0.125em;}#chatgpt-mermaid-\_r_le\_ .node .label-icon path{fill:currentColor;stroke:revert;stroke-width:revert;}#chatgpt-mermaid-\_r_le\_ .node .neo-node{stroke:rgb(31, 78, 148);}#chatgpt-mermaid-\_r_le\_ [data-look="neo"].node rect,#chatgpt-mermaid-\_r_le\_ [data-look="neo"].cluster rect,#chatgpt-mermaid-\_r_le\_ [data-look="neo"].node polygon{stroke:url(#chatgpt-mermaid-\_r_le\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_le\_ [data-look="neo"].swimlane.cluster rect{filter:none;}#chatgpt-mermaid-\_r_le\_ [data-look="neo"].node path{stroke:url(#chatgpt-mermaid-\_r_le\_-gradient);stroke-width:1px;}#chatgpt-mermaid-\_r_le\_ [data-look="neo"].node .outer-path{filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_le\_ [data-look="neo"].node .neo-line path{stroke:rgb(31, 78, 148);filter:none;}#chatgpt-mermaid-\_r_le\_ [data-look="neo"].node circle{stroke:url(#chatgpt-mermaid-\_r_le\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_le\_ [data-look="neo"].node circle .state-start{fill:#000000;}#chatgpt-mermaid-\_r_le\_ [data-look="neo"].icon-shape .icon{fill:url(#chatgpt-mermaid-\_r_le\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_le\_ [data-look="neo"].icon-shape .icon-neo path{stroke:url(#chatgpt-mermaid-\_r_le\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_le\_ .node text{font-size:14px;font-weight:600;letter-spacing:normal;fill:rgb(153, 206, 255);}#chatgpt-mermaid-\_r_le\_ .edgeLabels text{font-size:13px;font-weight:600;letter-spacing:-0.08px;fill:rgb(153, 206, 255);}#chatgpt-mermaid-\_r_le\_ .node tspan[font-weight="normal"],#chatgpt-mermaid-\_r_le\_ .edgeLabels tspan[font-weight="normal"]{font-weight:600;}#chatgpt-mermaid-\_r_le\_ .edgeLabel .label rect{opacity:1;rx:13px;ry:13px;fill:rgb(0, 14, 26);stroke:rgb(26, 62, 95);stroke-width:1px;}#chatgpt-mermaid-\_r_le\_ .node rect,#chatgpt-mermaid-\_r_le\_ .node circle,#chatgpt-mermaid-\_r_le\_ .node ellipse,#chatgpt-mermaid-\_r_le\_ .node polygon,#chatgpt-mermaid-\_r_le\_ .node path{fill:rgb(0, 40, 77);stroke:rgba(255, 255, 255, 0.1);stroke-width:1px;}#chatgpt-mermaid-\_r_le\_ .node rect{rx:16px;ry:16px;}#chatgpt-mermaid-\_r_le\_ .mermaid-decision .label-container{fill:rgb(0, 14, 26);stroke:rgb(26, 62, 95);stroke-dasharray:2,2;}#chatgpt-mermaid-\_r_le\_ .edgePaths .flowchart-link{stroke:rgb(175, 175, 175);stroke-width:1px;stroke-linecap:round;stroke-linejoin:round;}#chatgpt-mermaid-\_r_le\_ .marker{fill:rgb(175, 175, 175);stroke:rgb(175, 175, 175);}#chatgpt-mermaid-\_r_le\_ :root{--mermaid-font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,"Segoe UI",Helvetica,"Apple Color Emoji",Arial,sans-serif,"Segoe UI Emoji","Segoe UI Symbol";}Select serviceEnter postcodeArea supported?Show unavailable messageSelect property sizeCalculate starting priceAdvanced options?Apply modifiers and add-onsShow final estimateSave quoteBook or request manualquoteNoYesYesNo
-
-# 6. Booking and calendar system
-
-This module needs special attention because duplicate bookings and calendar conflicts can create real business problems.
-
-### Booking workflow
-
-\#chatgpt-mermaid-\_r_lq\_{font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,"Segoe UI",Helvetica,"Apple Color Emoji",Arial,sans-serif,"Segoe UI Emoji","Segoe UI Symbol";font-size:16px;fill:rgb(237, 237, 237);}@keyframes edge-animation-frame{from{stroke-dashoffset:0;}}@keyframes dash{to{stroke-dashoffset:0;}}#chatgpt-mermaid-\_r_lq\_ .edge-animation-slow{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 50s linear infinite;stroke-linecap:round;}#chatgpt-mermaid-\_r_lq\_ .edge-animation-fast{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 20s linear infinite;stroke-linecap:round;}#chatgpt-mermaid-\_r_lq\_ .error-icon{fill:rgb(48, 48, 48);}#chatgpt-mermaid-\_r_lq\_ .error-text{fill:rgb(237, 237, 237);stroke:rgb(237, 237, 237);}#chatgpt-mermaid-\_r_lq\_ .edge-thickness-normal{stroke-width:1px;}#chatgpt-mermaid-\_r_lq\_ .edge-thickness-thick{stroke-width:3.5px;}#chatgpt-mermaid-\_r_lq\_ .edge-pattern-solid{stroke-dasharray:0;}#chatgpt-mermaid-\_r_lq\_ .edge-thickness-invisible{stroke-width:0;fill:none;}#chatgpt-mermaid-\_r_lq\_ .edge-pattern-dashed{stroke-dasharray:3;}#chatgpt-mermaid-\_r_lq\_ .edge-pattern-dotted{stroke-dasharray:2;}#chatgpt-mermaid-\_r_lq\_ .marker{fill:rgb(175, 175, 175);stroke:rgb(175, 175, 175);}#chatgpt-mermaid-\_r_lq\_ .marker.cross{stroke:rgb(175, 175, 175);}#chatgpt-mermaid-\_r_lq\_ svg{font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,"Segoe UI",Helvetica,"Apple Color Emoji",Arial,sans-serif,"Segoe UI Emoji","Segoe UI Symbol";font-size:16px;}#chatgpt-mermaid-\_r_lq\_ p{margin:0;}#chatgpt-mermaid-\_r_lq\_ .label{font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,"Segoe UI",Helvetica,"Apple Color Emoji",Arial,sans-serif,"Segoe UI Emoji","Segoe UI Symbol";color:rgb(237, 237, 237);}#chatgpt-mermaid-\_r_lq\_ .cluster-label text{fill:rgb(237, 237, 237);}#chatgpt-mermaid-\_r_lq\_ .cluster-label span{color:rgb(237, 237, 237);}#chatgpt-mermaid-\_r_lq\_ .cluster-label span p{background-color:transparent;}#chatgpt-mermaid-\_r_lq\_ .label text,#chatgpt-mermaid-\_r_lq\_ span{fill:rgb(237, 237, 237);color:rgb(237, 237, 237);}#chatgpt-mermaid-\_r_lq\_ .node rect,#chatgpt-mermaid-\_r_lq\_ .node circle,#chatgpt-mermaid-\_r_lq\_ .node ellipse,#chatgpt-mermaid-\_r_lq\_ .node polygon,#chatgpt-mermaid-\_r_lq\_ .node path{fill:rgb(9, 23, 44);stroke:rgb(31, 78, 148);stroke-width:1px;}#chatgpt-mermaid-\_r_lq\_ .rough-node .label text,#chatgpt-mermaid-\_r_lq\_ .node .label text,#chatgpt-mermaid-\_r_lq\_ .image-shape .label,#chatgpt-mermaid-\_r_lq\_ .icon-shape .label{text-anchor:middle;}#chatgpt-mermaid-\_r_lq\_ .node .katex path{fill:#000;stroke:#000;stroke-width:1px;}#chatgpt-mermaid-\_r_lq\_ .rough-node .label,#chatgpt-mermaid-\_r_lq\_ .node .label,#chatgpt-mermaid-\_r_lq\_ .image-shape .label,#chatgpt-mermaid-\_r_lq\_ .icon-shape .label{text-align:center;}#chatgpt-mermaid-\_r_lq\_ .node.clickable{cursor:pointer;}#chatgpt-mermaid-\_r_lq\_ .root .anchor path{fill:rgb(175, 175, 175)!important;stroke-width:0;stroke:rgb(175, 175, 175);}#chatgpt-mermaid-\_r_lq\_ .arrowheadPath{fill:rgb(175, 175, 175);}#chatgpt-mermaid-\_r_lq\_ .edgePath .path{stroke:rgb(175, 175, 175);stroke-width:1px;}#chatgpt-mermaid-\_r_lq\_ .flowchart-link{stroke:rgb(175, 175, 175);fill:none;}#chatgpt-mermaid-\_r_lq\_ .edgeLabel{background-color:rgb(0, 0, 0);text-align:center;}#chatgpt-mermaid-\_r_lq\_ .edgeLabel p{background-color:rgb(0, 0, 0);}#chatgpt-mermaid-\_r_lq\_ .edgeLabel rect{opacity:0.5;background-color:rgb(0, 0, 0);fill:rgb(0, 0, 0);}#chatgpt-mermaid-\_r_lq\_ .labelBkg{background-color:rgba(0, 0, 0, 0.5);}#chatgpt-mermaid-\_r_lq\_ .cluster rect{fill:rgb(48, 48, 48);stroke:rgba(255, 255, 255, 0.15);stroke-width:1px;}#chatgpt-mermaid-\_r_lq\_ .cluster text{fill:rgb(237, 237, 237);}#chatgpt-mermaid-\_r_lq\_ .cluster span{color:rgb(237, 237, 237);}#chatgpt-mermaid-\_r_lq\_ div.mermaidTooltip{position:absolute;text-align:center;max-width:200px;padding:2px;font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,"Segoe UI",Helvetica,"Apple Color Emoji",Arial,sans-serif,"Segoe UI Emoji","Segoe UI Symbol";font-size:12px;background:rgb(48, 48, 48);border:1px solid rgba(255, 255, 255, 0.15);border-radius:2px;pointer-events:none;z-index:100;}#chatgpt-mermaid-\_r_lq\_ .flowchartTitleText{text-anchor:middle;font-size:18px;fill:rgb(237, 237, 237);}#chatgpt-mermaid-\_r_lq\_ rect.text{fill:none;stroke-width:0;}#chatgpt-mermaid-\_r_lq\_ .icon-shape,#chatgpt-mermaid-\_r_lq\_ .image-shape{background-color:rgb(0, 0, 0);text-align:center;}#chatgpt-mermaid-\_r_lq\_ .icon-shape p,#chatgpt-mermaid-\_r_lq\_ .image-shape p{background-color:rgb(0, 0, 0);padding:2px;}#chatgpt-mermaid-\_r_lq\_ .icon-shape .label rect,#chatgpt-mermaid-\_r_lq\_ .image-shape .label rect{opacity:0.5;background-color:rgb(0, 0, 0);fill:rgb(0, 0, 0);}#chatgpt-mermaid-\_r_lq\_ .label-icon{display:inline-block;height:1em;overflow:visible;vertical-align:-0.125em;}#chatgpt-mermaid-\_r_lq\_ .node .label-icon path{fill:currentColor;stroke:revert;stroke-width:revert;}#chatgpt-mermaid-\_r_lq\_ .node .neo-node{stroke:rgb(31, 78, 148);}#chatgpt-mermaid-\_r_lq\_ [data-look="neo"].node rect,#chatgpt-mermaid-\_r_lq\_ [data-look="neo"].cluster rect,#chatgpt-mermaid-\_r_lq\_ [data-look="neo"].node polygon{stroke:url(#chatgpt-mermaid-\_r_lq\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_lq\_ [data-look="neo"].swimlane.cluster rect{filter:none;}#chatgpt-mermaid-\_r_lq\_ [data-look="neo"].node path{stroke:url(#chatgpt-mermaid-\_r_lq\_-gradient);stroke-width:1px;}#chatgpt-mermaid-\_r_lq\_ [data-look="neo"].node .outer-path{filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_lq\_ [data-look="neo"].node .neo-line path{stroke:rgb(31, 78, 148);filter:none;}#chatgpt-mermaid-\_r_lq\_ [data-look="neo"].node circle{stroke:url(#chatgpt-mermaid-\_r_lq\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_lq\_ [data-look="neo"].node circle .state-start{fill:#000000;}#chatgpt-mermaid-\_r_lq\_ [data-look="neo"].icon-shape .icon{fill:url(#chatgpt-mermaid-\_r_lq\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_lq\_ [data-look="neo"].icon-shape .icon-neo path{stroke:url(#chatgpt-mermaid-\_r_lq\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_lq\_ .node text{font-size:14px;font-weight:600;letter-spacing:normal;fill:rgb(153, 206, 255);}#chatgpt-mermaid-\_r_lq\_ .edgeLabels text{font-size:13px;font-weight:600;letter-spacing:-0.08px;fill:rgb(153, 206, 255);}#chatgpt-mermaid-\_r_lq\_ .node tspan[font-weight="normal"],#chatgpt-mermaid-\_r_lq\_ .edgeLabels tspan[font-weight="normal"]{font-weight:600;}#chatgpt-mermaid-\_r_lq\_ .edgeLabel .label rect{opacity:1;rx:13px;ry:13px;fill:rgb(0, 14, 26);stroke:rgb(26, 62, 95);stroke-width:1px;}#chatgpt-mermaid-\_r_lq\_ .node rect,#chatgpt-mermaid-\_r_lq\_ .node circle,#chatgpt-mermaid-\_r_lq\_ .node ellipse,#chatgpt-mermaid-\_r_lq\_ .node polygon,#chatgpt-mermaid-\_r_lq\_ .node path{fill:rgb(0, 40, 77);stroke:rgba(255, 255, 255, 0.1);stroke-width:1px;}#chatgpt-mermaid-\_r_lq\_ .node rect{rx:16px;ry:16px;}#chatgpt-mermaid-\_r_lq\_ .mermaid-decision .label-container{fill:rgb(0, 14, 26);stroke:rgb(26, 62, 95);stroke-dasharray:2,2;}#chatgpt-mermaid-\_r_lq\_ .edgePaths .flowchart-link{stroke:rgb(175, 175, 175);stroke-width:1px;stroke-linecap:round;stroke-linejoin:round;}#chatgpt-mermaid-\_r_lq\_ .marker{fill:rgb(175, 175, 175);stroke:rgb(175, 175, 175);}#chatgpt-mermaid-\_r_lq\_ :root{--mermaid-font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,"Segoe UI",Helvetica,"Apple Color Emoji",Arial,sans-serif,"Segoe UI Emoji","Segoe UI Symbol";}Customer selects serviceSelect dateCheck available time slotsGoogle Calendar free/busycheckSlot available?Choose another slotReserve slot in databasePayment enabled?Stripe checkoutPay later bookingPayment successful?Payment failed / releasereservationConfirm bookingCreate Google CalendareventSend confirmationNoYesYesNoNoYes
-
-### Calendar rules
-
-The admin should be able to configure:
-
-- Working days.
-- Start and finish times.
-- Appointment duration.
-- Travel buffer.
-- Minimum booking lead time.
-- Maximum bookings per day.
-- Blocked dates and holidays.
-
-### Important implementation details
-
-- Check Google Calendar availability before showing slots.
-- Recheck availability when confirming a booking.
-- Use a database transaction to prevent two customers booking the same slot.
-- Keep a local booking record even if Google Calendar is temporarily unavailable.
-- Retry failed calendar synchronization through the background worker.
-
-For recurring bookings, create individual appointment occurrences linked to a parent booking. This allows one appointment to be rescheduled without changing the entire series.
-
-# 7. Image upload and storage
-
-External storage selected
-
-I recommend evaluating Cloudflare R2.
-
-[Exploring Cloudflare R2 Storage: A Cost-Effective Alternative to S3 - DEV Community](https://images.openai.com/static-rsc-4/SBh69Qrd6p40-bqIUa-c0bf5lMnBe2B2k2a5jrC1M4urE3iCx9OGSCnKwB28nE4W4Y1rs8HKB803cZJrvDRSmwZz6GjZKPaGN7HAfgmU2DputiySRD-WvuVeMAYCzu45p27-XuHhHnL7VaUjApdmOvUf4Iec4xyaVCI07NQW0nU?purpose=inline)
-
-Cloudflare R2
-
-S3-compatible object storage with no direct internet egress charges under its standard pricing model.
-
-[Official website](https://www.cloudflare.com/developer-platform/products/r2/?utm_source=chatgpt.com)
-
-### Upload process
-
-1. Customer selects images.
-2. Frontend requests a temporary upload URL from FastAPI.
-3. Backend generates a signed upload URL.
-4. Browser uploads directly to object storage.
-5. Backend stores image metadata in PostgreSQL.
-6. Admin can view the images through authorized access.
-
-Do not send large image files through FastAPI unless necessary.
-
-### Security rules
-
-- Accept JPEG, PNG and WebP.
-- Validate actual file types, not just extensions.
-- Set file-size and image-count limits.
-- Use private storage by default.
-- Generate temporary signed URLs for viewing.
-- Never expose storage credentials in frontend code.
-
-# 8. API design
-
-Use REST APIs with versioning:
-
-`/api/v1/...`
-
-Suggested endpoints:
-
-| Method | Endpoint                 | Purpose                 |
-| ------ | ------------------------ | ----------------------- |
-| GET    | `/services`              | List active services    |
-| GET    | `/services/{id}`         | Service details         |
-| POST   | `/quotes/calculate`      | Calculate instant quote |
-| POST   | `/quotes`                | Save quote              |
-| POST   | `/quote-requests`        | Submit manual quote     |
-| POST   | `/uploads/presign`       | Generate upload URL     |
-| GET    | `/availability`          | Get available slots     |
-| POST   | `/bookings`              | Create booking          |
-| GET    | `/bookings/{id}`         | Booking details         |
-| POST   | `/payments/checkout`     | Create Stripe checkout  |
-| POST   | `/webhooks/stripe`       | Receive Stripe events   |
-| GET    | `/admin/bookings`        | Manage bookings         |
-| GET    | `/admin/quotes`          | Manage quote requests   |
-| CRUD   | `/admin/services`        | Manage services         |
-| CRUD   | `/admin/pricing`         | Manage pricing          |
-| CRUD   | `/admin/postcodes`       | Manage service areas    |
-| POST   | `/admin/reviews/request` | Trigger review request  |
-
-Admin endpoints must require authentication and authorization.
-
-# 9. Admin dashboard design
-
-I recommend keeping the admin panel simple.
-
-## Admin dashboard — proposed layout
-
-Bookings
-
-# 12
-
-Illustrative data
-
-New quotes
-
-# 4
-
-Illustrative data
-
-Completed jobs
-
-# 28
-
-Illustrative data
-
-Pending jobs
-
-# 6
-
-Illustrative data
-
-Navigation
-
-- Overview
-- Bookings
-- Manual quote requests
-- Customers
-- Services
-- Pricing configuration
-- Service areas
-- Calendar
-- Reviews
-- Settings
-
-### Job status workflow
-
-Use these statuses:
+Each module should separate database models, Pydantic schemas, API
+routes and business logic.
+
+## 5. Database design
+
+### Proposed tables
+
+  Table                   Purpose
+  ----------------------- ----------------------------------------
+  `users`                 Admin accounts
+  `customers`             Customer contact details
+  `services`              Gardening services and active status
+  `service_pricing`       Pricing configuration per service
+  `size_tiers`            Small, medium, large and acreage tiers
+  `pricing_modifiers`     Condition and access adjustments
+  `addons`                Optional service add-ons
+  `postcodes`             Supported service areas
+  `quotes`                Instant quote records
+  `quote_requests`        Manual quote requests
+  `quote_images`          Uploaded image metadata
+  `bookings`              Parent booking records
+  `booking_items`         Services included in a booking
+  `booking_occurrences`   Individual recurring appointments
+  `payments`              Payment records
+  `calendar_events`       Google Calendar event references
+  `notifications`         Admin and customer notifications
+  `reviews`               Review request records
+  `settings`              Business configuration
+  `background_jobs`       Pending/retryable background tasks
+
+### Key relationships
+
+``` mermaid
+erDiagram
+    CUSTOMERS ||--o{ QUOTES : requests
+    CUSTOMERS ||--o{ QUOTE_REQUESTS : submits
+    CUSTOMERS ||--o{ BOOKINGS : makes
+    SERVICES ||--o{ SERVICE_PRICING : has
+    SERVICES ||--o{ QUOTES : selected_for
+    SERVICES ||--o{ BOOKING_ITEMS : included_in
+    QUOTE_REQUESTS ||--o{ QUOTE_IMAGES : contains
+    BOOKINGS ||--o{ BOOKING_ITEMS : contains
+    BOOKINGS ||--o{ BOOKING_OCCURRENCES : schedules
+    BOOKINGS ||--o{ PAYMENTS : has
+    BOOKINGS ||--o{ CALENDAR_EVENTS : synchronizes
+```
+
+### Database rules
+
+1.  Store money as integer cents, not floating-point values.
+2.  Store timestamps in UTC and configure the business timezone as
+    `Australia/Perth`.
+3.  Save a price snapshot with each quote and booking.
+4.  Updating current prices must not change existing bookings.
+5.  Store Stripe event IDs to prevent duplicate webhook processing.
+6.  Store Google Calendar event IDs to prevent duplicate event creation.
+7.  Disable services instead of deleting services with historical
+    records.
+
+## 6. Pricing engine
+
+Every service has its own pricing configuration and may use a different
+calculation method.
+
+Examples:
+
+-   Lawn mowing: property-size pricing.
+-   Weeding: size and condition pricing.
+-   Gutter cleaning: property and roof complexity.
+-   Turf laying: area-based pricing.
+-   Pressure washing: surface-area pricing.
+-   Tree planting / landscaping: manual quote only.
+
+A possible configurable calculation is:
+
+`total = (base_price × size_factor × condition_factor × access_factor) - discount + addons`
+
+This is a starting model, not a rule that every service must follow. The
+pricing engine must support service-specific methods and fixed add-ons.
+
+The admin must be able to edit prices and modifiers without code
+changes. Seed prices are placeholders until the business supplies real
+rates.
+
+### Quote flow
+
+``` mermaid
+flowchart TD
+    A[Select service] --> B[Enter postcode]
+    B --> C{Postcode supported?}
+    C -->|No| D[Show service-area message]
+    C -->|Yes| E[Select property size]
+    E --> F[Calculate starting price]
+    F --> G{Advanced options?}
+    G -->|Yes| H[Apply modifiers and add-ons]
+    G -->|No| I[Show estimate]
+    H --> I
+    I --> J[Save quote]
+    J --> K[Book or request manual quote]
+```
+
+## 7. Booking and Google Calendar
+
+### Booking flow
+
+``` mermaid
+flowchart TD
+    A[Select service] --> B[Select date]
+    B --> C[Check availability]
+    C --> D[Check Google Calendar free/busy]
+    D --> E{Slot available?}
+    E -->|No| F[Choose another slot]
+    E -->|Yes| G[Create temporary database reservation]
+    G --> H{Payments enabled?}
+    H -->|Yes| I[Stripe Checkout]
+    H -->|No| J[Pay later]
+    I --> K{Payment successful?}
+    K -->|No| L[Handle failure and reservation expiry]
+    K -->|Yes| M[Confirm booking]
+    J --> M
+    M --> N[Sync Google Calendar event]
+    N --> O[Send confirmation]
+```
+
+### Availability settings
+
+Admin-configurable settings should include:
+
+-   Working days and hours.
+-   Service duration.
+-   Travel buffer.
+-   Minimum booking lead time.
+-   Maximum jobs per day.
+-   Blocked dates and holidays.
+
+### Reliability rules
+
+-   Check availability before displaying slots and recheck during
+    booking.
+-   Prevent overlapping bookings with database transactions and
+    appropriate constraints.
+-   Keep the local booking record if Google Calendar is unavailable.
+-   Retry failed calendar synchronization in the background.
+-   Create individual appointment occurrences for recurring bookings so
+    one occurrence can be changed independently.
+
+Google Calendar and PostgreSQL need a clear conflict policy. External
+calendar events should be considered when checking availability, but
+confirmed local bookings remain the application record.
+
+## 8. Image uploads and object storage
+
+Cloudflare R2 is a proposed S3-compatible storage option. Confirm
+current pricing and account requirements before choosing it.
+
+### Upload flow
+
+1.  Browser requests a temporary upload URL from FastAPI.
+2.  FastAPI validates the request and creates a signed URL.
+3.  Browser uploads directly to object storage.
+4.  Backend saves image metadata and object key in PostgreSQL.
+5.  Admin views images using short-lived signed URLs.
+
+### Upload safeguards
+
+-   Allow only required formats such as JPEG, PNG and WebP.
+-   Validate actual file content, not only file extensions.
+-   Set configurable file-size and image-count limits.
+-   Keep the bucket private.
+-   Do not expose storage credentials in frontend code.
+-   Consider malware scanning and image metadata removal.
+
+Suggested initial limits: five images per request and 10 MB per image.
+These are configurable defaults.
+
+## 9. API design
+
+Use REST endpoints under `/api/v1`.
+
+  Method   Endpoint                   Purpose
+  -------- -------------------------- --------------------------------
+  GET      `/services`                List active services
+  GET      `/services/{id}`           Service details
+  POST     `/quotes/calculate`        Calculate estimate
+  POST     `/quotes`                  Save instant quote
+  POST     `/quote-requests`          Submit manual quote
+  POST     `/uploads/presign`         Generate upload URL
+  GET      `/availability`            Get available slots
+  POST     `/bookings`                Create booking
+  GET      `/bookings/{id}`           Booking details
+  POST     `/payments/checkout`       Create Stripe Checkout session
+  POST     `/webhooks/stripe`         Receive Stripe events
+  GET      `/admin/bookings`          List/manage bookings
+  GET      `/admin/quotes`            List/manage quote requests
+  CRUD     `/admin/services`          Manage services
+  CRUD     `/admin/pricing`           Manage pricing
+  CRUD     `/admin/postcodes`         Manage service areas
+  POST     `/admin/reviews/request`   Trigger review request
+
+All admin endpoints require authentication and authorization. Public
+endpoints need validation and rate limiting.
+
+## 10. Admin dashboard
+
+### Navigation
+
+-   Overview
+-   Bookings
+-   Manual quote requests
+-   Customers
+-   Services
+-   Pricing configuration
+-   Service areas
+-   Calendar
+-   Reviews
+-   Settings
+
+### Job statuses
+
+Main workflow:
 
 `NEW → QUOTED → BOOKED → COMPLETED`
 
 Additional statuses:
 
-- LOST
-- CANCELLED
-- PAYMENT_PENDING
+-   `LOST`
+-   `CANCELLED`
+-   `PAYMENT_PENDING`
 
-The dashboard should also provide search, filters and booking detail pages.
+The dashboard should support search, filters and a detail page for each
+booking or quote request.
 
-# 10. Docker and VPS deployment design
-
-Use Docker Compose to manage the application.
+## 11. Docker and VPS deployment
 
 ### Production containers
 
-| Container  | Purpose                 |
-| ---------- | ----------------------- |
-| `frontend` | Next.js                 |
-| `backend`  | FastAPI API             |
-| `worker`   | Background tasks        |
-| `db`       | PostgreSQL              |
-| `caddy`    | HTTPS and reverse proxy |
+  Container    Responsibility
+  ------------ -------------------------
+  `frontend`   Next.js
+  `backend`    FastAPI
+  `worker`     Background tasks
+  `db`         PostgreSQL
+  `caddy`      HTTPS and reverse proxy
 
-All containers run on one VPS initially.
+### Project root
 
-### Request routing
-
-```
-yourdomain.com
-       |
-     Caddy
-       |
-       |------ /       -> Next.js
-       |
-       |------ /api/*  -> FastAPI
-```
-
-This gives you a single domain, simplifies browser security and avoids unnecessary cross-origin configuration.
-
-### Suggested project root
-
-```
+``` text
 gardening-website/
-│
 ├── frontend/
 ├── backend/
 ├── docker/
 │   └── caddy/
-│
+├── docs/
 ├── docker-compose.yml
 ├── .env.example
 ├── .gitignore
 └── README.md
 ```
 
+### Routing
+
+``` text
+yourdomain.com       -> Next.js
+yourdomain.com/api/* -> FastAPI
+```
+
 ### Production requirements
 
-- Environment variables for secrets.
-- HTTPS enabled automatically.
-- PostgreSQL data persisted in a Docker volume.
-- Database backups stored outside the VPS.
-- Container health checks and restart policies.
-- Log rotation.
-- Separate development and production environments.
-- No public database port.
+-   Store secrets in environment variables, not Git.
+-   Enable HTTPS.
+-   Persist PostgreSQL data in a Docker volume.
+-   Back up the database off the VPS.
+-   Configure container health checks and restart policies.
+-   Configure log rotation.
+-   Keep development and production environments separate.
+-   Do not expose the PostgreSQL port publicly.
 
-Do not put Stripe secret keys, Google credentials or storage credentials inside frontend code or Git.
+## 12. Security and reliability
 
-# 11. Security and reliability
+  Area                Implementation
+  ------------------- --------------------------------------
+  Admin login         Secure password hashing
+  Sessions            HttpOnly, Secure, SameSite cookies
+  API                 Pydantic validation
+  Database            SQLAlchemy and parameterized queries
+  Uploads             File validation and private storage
+  Payments            Verified Stripe webhooks
+  Booking             Transactions and conflict prevention
+  Spam                Rate limiting; CAPTCHA if needed
+  Secrets             Environment variables
+  Backups             Automated off-server backups
+  Admin permissions   Role-based access control
 
-These are not optional, even for a small website.
+Start with one administrator role. Add more roles only if the business
+needs them.
 
-| Area              | Implementation                               |
-| ----------------- | -------------------------------------------- |
-| Admin login       | Secure password hashing                      |
-| Sessions          | HttpOnly, Secure, SameSite cookies           |
-| API               | Input validation with Pydantic               |
-| Database          | Parameterized queries through ORM            |
-| Uploads           | File validation and private storage          |
-| Payments          | Verified Stripe webhooks                     |
-| Booking           | Database transaction and conflict prevention |
-| Spam              | Rate limiting and CAPTCHA where appropriate  |
-| Secrets           | Environment variables                        |
-| Backups           | Automated off-server backups                 |
-| Admin permissions | Role-based access control                    |
+## 13. Development milestones
 
-I recommend starting with one administrator role. More roles can be added if the business grows.
+  Milestone   Work                                 Priority
+  ----------- ------------------------------------ ----------
+  M1          Repository, Docker, VPS foundation   Critical
+  M2          Database and backend foundation      Critical
+  M3          Website UI and responsive pages      Critical
+  M4          Services and pricing engine          Critical
+  M5          Instant and manual quote systems     Critical
+  M6          Admin dashboard                      Critical
+  M7          Booking and Google Calendar          Critical
+  M8          Stripe and email notifications       High
+  M9          Reviews, analytics and legal pages   High
+  M10         Testing, optimization and launch     Critical
 
-## 12. Development work plan
+Estimated development time: approximately nine weeks for one developer
+working consistently. This is an estimate, not a fixed deadline.
 
-I would divide development into 10 milestones.
+## 14. Acceptance testing
 
-| Milestone | Development work                   | Priority |
-| --------- | ---------------------------------- | -------- |
-| M1        | Project setup, Docker, VPS         | Critical |
-| M2        | Database and backend foundation    | Critical |
-| M3        | Website UI and responsive pages    | Critical |
-| M4        | Services and pricing engine        | Critical |
-| M5        | Instant and manual quote systems   | Critical |
-| M6        | Admin dashboard                    | Critical |
-| M7        | Booking and Google Calendar        | Critical |
-| M8        | Stripe and email notifications     | High     |
-| M9        | Reviews, analytics and legal pages | High     |
-| M10       | Testing, optimization and launch   | Critical |
+  Feature         Acceptance criteria
+  --------------- ----------------------------------------
+  Website         Responsive on mobile and desktop
+  Pricing         Correct service-specific calculations
+  Postcodes       Unsupported areas rejected
+  Manual quotes   Images and customer details saved
+  Admin           Prices updated without code changes
+  Booking         Overlapping bookings prevented
+  Calendar        Confirmed bookings synchronized
+  Stripe          Payments and webhook verification work
+  Email           Customer and admin notifications work
+  Security        Admin routes and uploads protected
+  Performance     Pages and images optimized
+  Backup          Database restore tested
 
-### Suggested development schedule
+## 15. Business decisions to confirm
 
-Illustrative development allocation, assuming one developer working consistently. Not a fixed deadline.
+Proposed defaults, not yet confirmed:
 
-0 weeks0.55 weeks1.1 weeks1.65 weeks2.2 weeksFoundationWebsite UIQuote engineAdmin panelBooking & integrationsTesting & launch
+  Decision             Proposed default
+  -------------------- ----------------------------------
+  Currency             AUD
+  Business timezone    Australia/Perth
+  Booking duration     Configurable per service
+  Payment              Full payment when enabled
+  Pay later            Admin toggle
+  Quote validity       14 days
+  Image limit          5 per request
+  Maximum image size   10 MB
+  Customer accounts    Not required for v1
+  Admin accounts       Login required
+  Recurring bookings   Separate appointment occurrences
+  Image storage        Cloudflare R2
 
-Estimated total: 9 weeks, allowing some overlap between development tasks. Integration testing and unexpected issues can extend this.
+## 16. First development sprint
 
-# 13. Testing and launch requirements
+-   [ ] Initialize Git repository.
+-   [ ] Create Next.js frontend.
+-   [ ] Create FastAPI backend.
+-   [ ] Configure PostgreSQL and SQLAlchemy.
+-   [ ] Configure Docker Compose.
+-   [ ] Configure Caddy reverse proxy.
+-   [ ] Run the application locally.
+-   [ ] Verify frontend/backend/database communication.
+-   [ ] Deploy initial version to Hostinger VPS.
+-   [ ] Verify HTTPS and persistent database storage.
 
-Before deployment, every major feature needs to pass acceptance testing.
+**Sprint completion:** The frontend, backend and database communicate
+successfully, and the website is accessible through HTTPS on the domain.
 
-| Feature       | Acceptance criteria                     |
-| ------------- | --------------------------------------- |
-| Website       | Responsive on mobile and desktop        |
-| Pricing       | Correct service-specific calculations   |
-| Postcodes     | Reject unsupported locations            |
-| Manual quotes | Images and customer details saved       |
-| Admin         | Can update pricing without code changes |
-| Booking       | Cannot double-book a time slot          |
-| Calendar      | Confirmed bookings synchronize          |
-| Stripe        | Payment and webhook verification work   |
-| Email         | Customer and admin notifications work   |
-| Security      | Admin routes and uploads protected      |
-| Performance   | Fast page loads and optimized images    |
-| Backup        | Database can be restored successfully   |
+## 17. Deferred from v1
 
-# 14. Decisions still needed before implementation
-
-The architecture is settled, but some business rules need confirmation.
-
-| Question           | My recommendation                          |
-| ------------------ | ------------------------------------------ |
-| Currency           | AUD                                        |
-| Business timezone  | Australia/Perth                            |
-| Booking duration   | Configurable per service                   |
-| Booking payment    | Full payment initially, configurable later |
-| Pay later          | Admin toggle                               |
-| Quote validity     | Configurable, e.g. 14 days                 |
-| Image limit        | 5 images per request initially             |
-| Maximum image size | 10 MB each                                 |
-| Customer accounts  | No accounts required for v1                |
-| Admin accounts     | Login required                             |
-| Recurring bookings | Individual appointment occurrences         |
-| Storage            | Cloudflare R2                              |
-| Reviews            | Google Business Profile API                |
-
-These are proposed defaults, not confirmed business requirements.
-
-# 15. Recommended implementation order
-
-My recommendation is to start coding in this order:
-
-## First development sprint
-
-Start here
-
-1. Initialize Git repository.
-2. Create Next.js frontend.
-3. Create FastAPI backend.
-4. Configure PostgreSQL and SQLAlchemy.
-5. Create Docker Compose configuration.
-6. Configure Caddy reverse proxy.
-7. Run the complete application locally on macOS.
-8. Deploy the first version to Hostinger VPS.
-
-Sprint completion: The frontend, backend and database communicate successfully, and the website is accessible through HTTPS on your domain.
-
-## 16. Final architecture summary
-
-## Version 1 architecture
-
-Architecture
-
-Modular monolith
-
-Frontend
-
-Next.js / JavaScript
-
-Backend
-
-FastAPI / Python
-
-Database
-
-PostgreSQL
-
-Infrastructure
-
-Docker Compose / VPS
-
-Image storage
-
-Cloudflare R2
-
-Estimated development
-
-\~9 weeks
-
-Not included in v1: AI quoting, SMS, blog, mobile app and multi-vendor functionality.
-
-Next step: Finalize the business rules in section 14, then create the actual development blueprint: database SQLAlchemy models, API specifications, complete folder structure, Docker files and implementation tasks.
-
-I can also review your implementation and update the development task list every week.
-
-🛠️Review project progress weeklyTap to set up
+-   AI image-based automatic quoting.
+-   Twilio SMS integration.
+-   Blog/content hub.
+-   Suburb coverage map.
+-   Native mobile applications.
+-   Multi-language support.
+-   Franchise or partner portal.
+-   Multi-vendor functionality.
